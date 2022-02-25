@@ -157,6 +157,9 @@ struct jk_shm_lb_sub_worker
     volatile jk_uint64_t  sessions;
     /* Number of non 200 responses */
     volatile jk_uint32_t  errors;
+    /* Slow start */
+    volatile time_t slow_start_time;
+    volatile jk_uint64_t  used_since_slow_start;
 };
 typedef struct jk_shm_lb_sub_worker jk_shm_lb_sub_worker_t;
 

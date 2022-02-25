@@ -620,6 +620,8 @@ static int recover_workers(lb_worker_t *p,
                     w->s->lb_value = curmax;
                 aw->s->reply_timeouts = 0;
                 w->s->state = JK_LB_STATE_RECOVER;
+                w->s->slow_start_time = time(NULL);
+                w->s->used_since_slow_start = 0;
                 non_error++;
             }
         }
@@ -631,6 +633,7 @@ static int recover_workers(lb_worker_t *p,
                        "worker %s escalating local error to global error",
                        w->name);
             w->s->state = JK_LB_STATE_ERROR;
+            w->s->slow_start_time = 0;
         }
         else {
             non_error++;
@@ -1362,6 +1365,12 @@ static int JK_METHOD service(jk_endpoint_t *e,
                 if (p->worker->lblock == JK_LB_LOCK_PESSIMISTIC)
                     jk_shm_lock();
 
+                /* Slow start */
+                jk_uint64_t lb_mult = rec->lb_mult;
+                if (rec->s->slow_start_time != 0) {
+                    lb_mult = 32767;
+                }
+
                 /* Increment the number of workers serving request */
                 busy = JK_ATOMIC_INCREMENT(&(p->worker->s->busy));
                 if (busy > p->worker->s->max_busy)
@@ -1372,7 +1381,7 @@ static int JK_METHOD service(jk_endpoint_t *e,
                      s->extension.stateless != JK_TRUE &&
                      (p->worker->lbmethod == JK_LB_METHOD_SESSIONS ||
                       p->worker->lbmethod == JK_LB_METHOD_NEXT)))
-                    rec->s->lb_value += rec->lb_mult;
+                    rec->s->lb_value += lb_mult;
                 if (!sessionid && s->extension.stateless != JK_TRUE) {
                     rec->s->sessions++;
                 }
@@ -1426,11 +1435,11 @@ static int JK_METHOD service(jk_endpoint_t *e,
 
                 /* Update partial reads and writes if any */
                 if (p->worker->lbmethod == JK_LB_METHOD_TRAFFIC) {
-                    rec->s->lb_value += (rd+wr)*rec->lb_mult;
+                    rec->s->lb_value += (rd+wr)*lb_mult;
                 }
                 else if (p->worker->lbmethod == JK_LB_METHOD_BUSYNESS) {
-                    if (rec->s->lb_value >= rec->lb_mult) {
-                        rec->s->lb_value -= rec->lb_mult;
+                    if (rec->s->lb_value >= lb_mult) {
+                        rec->s->lb_value -= lb_mult;
                     }
                     else {
                         rec->s->lb_value = 0;
@@ -1444,7 +1453,7 @@ static int JK_METHOD service(jk_endpoint_t *e,
                                    "- correcting to 0",
                                    rec->name,
                                    rec->s->lb_value,
-                                   rec->lb_mult);
+                                   lb_mult);
                         }
                     }
                 }
@@ -1473,6 +1482,15 @@ static int JK_METHOD service(jk_endpoint_t *e,
                     rec->s->last_error_time = 0;
                     rc = JK_TRUE;
                     recoverable = JK_UNSET;
+
+                    if (rec->s->slow_start_time != 0) {
+                        rec->s->used_since_slow_start ++;
+
+                        /* Check for end of slow start */
+                        if (rec->s->used_since_slow_start > 10) {
+                            rec->s->slow_start_time = 0;
+                        }
+                    }
                 }
                 else if (service_stat == JK_CLIENT_ERROR) {
                     /*
@@ -1538,6 +1556,7 @@ static int JK_METHOD service(jk_endpoint_t *e,
                      */
                     rec->s->errors++;
                     rec->s->state = JK_LB_STATE_ERROR;
+                    rec->s->slow_start_time = 0;
                     p->states[rec->i] = JK_LB_STATE_ERROR;
                     rec->s->first_error_time = time(NULL);
                     rec->s->last_error_time = rec->s->first_error_time;
@@ -1553,6 +1572,7 @@ static int JK_METHOD service(jk_endpoint_t *e,
                          */
                         rec->s->errors++;
                         rec->s->state = JK_LB_STATE_ERROR;
+                        rec->s->slow_start_time = 0;
                         p->states[rec->i] = JK_LB_STATE_ERROR;
                         rec->s->first_error_time = time(NULL);
                         rec->s->last_error_time = rec->s->first_error_time;
@@ -1586,6 +1606,7 @@ static int JK_METHOD service(jk_endpoint_t *e,
                                    "worker %s escalating local error to global error",
                                    rec->name);
                         rec->s->state = JK_LB_STATE_ERROR;
+                        rec->s->slow_start_time = 0;
                     }
                     p->states[rec->i] = JK_LB_STATE_ERROR;
                     if (rec->s->first_error_time == 0) {

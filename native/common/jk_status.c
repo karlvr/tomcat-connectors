@@ -361,6 +361,7 @@
                                            "<th>Wr</th><th>Rd</th><th>Busy</th><th>MaxBusy</th><th>Con</th><th>MaxCon</th>" \
                                            "<th>" JK_STATUS_ARG_LBM_HEAD_ROUTE "</th>" \
                                            "<th>RR</th><th>Cd</th><th>Rs</th><th>LR</th><th>LE</th>" \
+                                           "<th>Slow Start</th>" \
                                            "</tr>\n"
 #define JK_STATUS_SHOW_MEMBER_ROW          "<td>%s</td>" \
                                            "<td>%s</td>" \
@@ -385,6 +386,7 @@
                                            "<td>%s</td>" \
                                            "<td>%d/%d</td>" \
                                            "<td>%d</td>" \
+                                           "<td>%s</td>" \
                                            "<td>%s</td>" \
                                            "</tr>\n"
 #define JK_STATUS_SHOW_MEMBER_CONF_HEAD    "<tr valign=\"bottom\">" \
@@ -1906,6 +1908,7 @@ static void display_worker_ajp_details(jk_ws_service_t *s,
     char buf_tz[JK_STATUS_TIME_BUF_SZ];
     time_t error_time = 0;
     int rc_time = -1;
+    char buf_slow_start[32];
 
     JK_TRACE_ENTER(l);
 
@@ -1938,6 +1941,9 @@ static void display_worker_ajp_details(jk_ws_service_t *s,
     if (error_time > 0) {
         delta_error = (int)difftime(now, error_time);
         rc_time = status_strftime(error_time, mime, buf_time, buf_tz, l);
+    }
+    if (wr->s->slow_start_time != 0) {
+        snprintf(buf_slow_start, 32, "%ld/%d", wr->s->used_since_slow_start, 10);
     }
 
     if (mime == JK_STATUS_MIME_HTML) {
@@ -1972,7 +1978,9 @@ static void display_worker_ajp_details(jk_ws_service_t *s,
                       rs_min,
                       rs_max,
                       delta_reset,
-                      rc_time > 0 ? buf_time : "&nbsp;");
+                      rc_time > 0 ? buf_time : "&nbsp;",
+                      wr->s->slow_start_time != 0 ? buf_slow_start : "&nbsp;"
+                      );
         else {
             jk_printf(s, l, JK_STATUS_SHOW_AJP_ROW,
                       jk_ajp_get_state(aw, l),
@@ -4638,6 +4646,8 @@ static int recover_worker(jk_ws_service_t *s,
 
         aw->s->reply_timeouts = 0;
         wr->s->state = JK_LB_STATE_RECOVER;
+        wr->s->slow_start_time = time(NULL);
+        wr->s->used_since_slow_start = 0;
         jk_log(l, JK_LOG_INFO,
                "Status worker '%s' marked worker '%s' sub worker '%s' for recovery",
                w->name, worker ? worker : "(null)", sub_worker ? sub_worker : "(null)");
