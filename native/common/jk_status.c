@@ -3450,6 +3450,12 @@ static int commit_member(jk_ws_service_t *s,
                        w->name, wr->name, lb_name, jk_lb_get_activation(wr, l), jk_lb_get_activation_direct(i, l));
                 wr->activation = i;
                 *side_effect |= JK_STATUS_NEEDS_RESET_LB_VALUES | JK_STATUS_NEEDS_PUSH;
+
+                if (i == JK_LB_ACTIVATION_ACTIVE) {
+                    /* Start slow start */
+                    wr->s->slow_start_time = time(NULL);
+                    wr->s->used_since_slow_start = 0;
+                }
             }
         }
         if (set_int_if_changed(p, wr->name, "lbfactor", JK_STATUS_ARG_LBM_FACTOR,
