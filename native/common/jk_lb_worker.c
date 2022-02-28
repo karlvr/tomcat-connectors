@@ -1368,7 +1368,7 @@ static int JK_METHOD service(jk_endpoint_t *e,
                 /* Slow start */
                 jk_uint64_t lb_mult = rec->lb_mult;
                 if (rec->s->slow_start_time != 0) {
-                    lb_mult = 32767;
+                    lb_mult = 2^32; /* We set lb_mult to a large value so that we only let one (or close to one, due to race conditions) request through */
                 }
 
                 /* Increment the number of workers serving request */
